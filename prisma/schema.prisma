@@ -1,0 +1,111 @@
+// Campaign Experimentation Workspace — Database Schema
+//
+// Core entities:
+//   Experiment → Variants → Results (per metric)
+//   Experiment → Metrics (what we're measuring)
+//   Experiment → Learning (what we learned)
+//   ExperimentTemplate (pre-built starting points)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// A single A/B test experiment designed by the marketing team.
+model Experiment {
+  id        String   @id @default(cuid())
+  name      String
+  element   String   // MESSAGING, CTA, VALUE_PROP, AUDIENCE, TIMING
+  channel   String   // EMAIL, PAID_SOCIAL, LANDING_PAGE, SMS, ORGANIC_SOCIAL, OTHER
+  status    String   @default("DRAFT") // DRAFT, RUNNING, COMPLETED
+  hypothesis String  @default("")
+  audience  String   @default("") // free-text audience description
+  goal      String   @default("") // what the experiment aims to achieve
+  baselineRate Float @default(0) // current rate for primary metric (e.g. 0.22)
+  minimumLift  Float @default(0) // minimum detectable relative lift (e.g. 0.10)
+  sampleSizePerVariant Int @default(0) // calculated required sample size
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants Variant[]
+  metrics  Metric[]
+  learning Learning?
+}
+
+/// A single variant (control or challenger) within an experiment.
+model Variant {
+  id           String   @id @default(cuid())
+  experimentId String
+  name         String   // e.g. "Variant A (Control)"
+  content      String   // copy (text channels), concept description (visual channels), or segment/time (structural)
+  description  String   @default("") // rationale or notes
+  prompt       String   @default("") // AI-generated prompt for visual channels (landing page, paid social)
+  url          String   @default("") // URL of the built variant (landing pages, ads)
+  isControl    Boolean  @default(false)
+  sortOrder    Int      @default(0)
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  results    Result[]
+}
+
+/// A metric being tracked in an experiment (e.g. open rate, click rate).
+model Metric {
+  id           String   @id @default(cuid())
+  experimentId String
+  name         String   // e.g. "Open Rate", "Click Rate"
+  isPrimary    Boolean  @default(false)
+  sortOrder    Int      @default(0)
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  results    Result[]
+}
+
+/// A single result data point: the measured value for one variant on one metric.
+model Result {
+  id         String @id @default(cuid())
+  variantId  String
+  metricId   String
+  sampleSize Int    // number of observations (sends, impressions, visitors)
+  successes  Int    // number of successes (opens, clicks, conversions)
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  metric  Metric  @relation(fields: [metricId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, metricId])
+}
+
+/// A structured learning extracted from a completed experiment.
+/// Saved to the knowledge base for future reference.
+model Learning {
+  id           String   @id @default(cuid())
+  experimentId String   @unique
+  summary      String   // AI-generated summary of what was learned
+  takeaway     String   @default("") // marketer's own notes
+  channel      String   // copied from experiment for filtering
+  element      String   // copied from experiment for filtering
+  winningVariant String @default("") // name of the winning variant
+  liftPercent  Float    @default(0) // relative lift of winner
+  confidence   Float    @default(0) // statistical confidence percentage
+  tags         String   @default("") // comma-separated tags for filtering
+  createdAt    DateTime @default(now())
+
+  experiment Experiment @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+}
+
+/// Pre-built experiment templates — the "golden workflows."
+/// Seeded at app init, one per experiment element type.
+model ExperimentTemplate {
+  id                String @id @default(cuid())
+  name              String // e.g. "Messaging Test"
+  element           String @unique // MESSAGING, CTA, VALUE_PROP, AUDIENCE, TIMING
+  description       String // one-liner shown on template card
+  defaultHypothesis String // template hypothesis with fill-in-the-blank structure
+  defaultMetrics    String // JSON array of suggested metric names
+  variantFramework  String // JSON description of how variants should be structured
+  guidingQuestions  String // JSON array of questions to ask during setup
+}
