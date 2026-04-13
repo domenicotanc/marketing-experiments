@@ -1,6 +1,5 @@
 import "dotenv/config";
-// Import from the custom generated output path
-const { PrismaClient } = require("../src/generated/prisma/client");
+import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
